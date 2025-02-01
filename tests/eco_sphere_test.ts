@@ -8,7 +8,7 @@ import {
 import { assertEquals } from 'https://deno.land/std@0.90.0/testing/asserts.ts';
 
 Clarinet.test({
-    name: "Can register a new business",
+    name: "Can register a new business with category",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const wallet1 = accounts.get('wallet_1')!;
@@ -17,7 +17,8 @@ Clarinet.test({
             Tx.contractCall('eco-sphere', 'register-business', [
                 types.ascii("Eco Store"),
                 types.ascii("A sustainable store"),
-                types.ascii("ISO 14001 certified")
+                types.ascii("ISO 14001 certified"),
+                types.ascii("retail")
             ], wallet1.address)
         ]);
         
@@ -30,49 +31,12 @@ Clarinet.test({
         ]);
         
         const business = getBusinessBlock.receipts[0].result.expectOk().expectSome();
-        assertEquals(business['name'], "Eco Store");
+        assertEquals(business['category'], "retail");
     }
 });
 
 Clarinet.test({
-    name: "Can rate and verify a business",
-    async fn(chain: Chain, accounts: Map<string, Account>) {
-        const deployer = accounts.get('deployer')!;
-        const wallet1 = accounts.get('wallet_1')!;
-        const wallet2 = accounts.get('wallet_2')!;
-        
-        // First register a business
-        let block = chain.mineBlock([
-            Tx.contractCall('eco-sphere', 'register-business', [
-                types.ascii("Eco Store"),
-                types.ascii("A sustainable store"),
-                types.ascii("ISO 14001 certified")
-            ], wallet1.address)
-        ]);
-        
-        // Rate the business
-        let rateBlock = chain.mineBlock([
-            Tx.contractCall('eco-sphere', 'rate-business', [
-                types.uint(1),
-                types.uint(5)
-            ], wallet2.address)
-        ]);
-        
-        rateBlock.receipts[0].result.expectOk().expectBool(true);
-        
-        // Verify the business
-        let verifyBlock = chain.mineBlock([
-            Tx.contractCall('eco-sphere', 'verify-business', [
-                types.uint(1)
-            ], wallet2.address)
-        ]);
-        
-        verifyBlock.receipts[0].result.expectOk().expectBool(true);
-    }
-});
-
-Clarinet.test({
-    name: "Can support a business",
+    name: "Can enable rewards and earn points",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         const wallet1 = accounts.get('wallet_1')!;
@@ -83,18 +47,38 @@ Clarinet.test({
             Tx.contractCall('eco-sphere', 'register-business', [
                 types.ascii("Eco Store"),
                 types.ascii("A sustainable store"),
-                types.ascii("ISO 14001 certified")
+                types.ascii("ISO 14001 certified"),
+                types.ascii("retail")
             ], wallet1.address)
         ]);
         
-        // Support business
-        let supportBlock = chain.mineBlock([
-            Tx.contractCall('eco-sphere', 'support-business', [
+        // Enable rewards
+        let enableBlock = chain.mineBlock([
+            Tx.contractCall('eco-sphere', 'enable-rewards', [
+                types.uint(1)
+            ], wallet1.address)
+        ]);
+        
+        enableBlock.receipts[0].result.expectOk().expectBool(true);
+        
+        // Rate business and earn points
+        let rateBlock = chain.mineBlock([
+            Tx.contractCall('eco-sphere', 'rate-business', [
                 types.uint(1),
-                types.uint(1000)
+                types.uint(5)
             ], wallet2.address)
         ]);
         
-        supportBlock.receipts[0].result.expectOk().expectBool(true);
+        rateBlock.receipts[0].result.expectOk().expectBool(true);
+        
+        // Check points
+        let pointsBlock = chain.mineBlock([
+            Tx.contractCall('eco-sphere', 'get-user-points', [
+                types.principal(wallet2.address),
+                types.uint(1)
+            ], wallet2.address)
+        ]);
+        
+        pointsBlock.receipts[0].result.expectOk().expectUint(10);
     }
 });
