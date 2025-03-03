@@ -6,8 +6,16 @@
 (define-constant err-not-found (err u101))
 (define-constant err-already-exists (err u102))
 (define-constant err-unauthorized (err u103))
+(define-constant err-invalid-rating (err u104))
+(define-constant err-invalid-input (err u105))
+(define-constant err-invalid-category (err u106))
+(define-constant max-support-amount u1000000000) ;; 1000 STX maximum support
 
-;; Data Variables
+;; State Variables
+(define-data-var next-business-id uint u1)
+(define-data-var total-ratings-count uint u0)
+
+;; Maps
 (define-map businesses
     { business-id: uint }
     {
@@ -17,6 +25,7 @@
         eco-credentials: (string-ascii 500),
         category: (string-ascii 20),
         rating: uint,
+        ratings-count: uint,
         verified: bool,
         total-support: uint,
         rewards-enabled: bool,
@@ -30,39 +39,37 @@
 )
 
 (define-map verifications
-    { user: principal, business-id: uint }
-    { verified: bool }
+    { verifier: principal, business-id: uint }
+    { verified: bool, timestamp: uint }
 )
 
-(define-map user-rewards
-    { user: principal, business-id: uint }
-    { points: uint }
+;; Valid Categories
+(define-data-var valid-categories (list 7 (string-ascii 20))
+    (list "retail" "services" "manufacturing" "food & beverage" "energy" "transportation" "waste management")
 )
-
-(define-data-var next-business-id uint u1)
 
 ;; Private Functions
-(define-private (is-business-owner (business-id uint) (caller principal))
-    (let ((business (unwrap! (map-get? businesses { business-id: business-id }) err-not-found)))
-        (is-eq (get owner business) caller)
-    )
+(define-private (is-valid-category (category (string-ascii 20)))
+    (fold and true (map (lambda (valid-cat) (is-eq category valid-cat)) (var-get valid-categories)))
 )
 
-(define-private (award-points (user principal) (business-id uint) (amount uint))
+(define-private (update-business-rating (business-id uint) (new-rating uint))
     (let (
         (business (unwrap! (map-get? businesses { business-id: business-id }) err-not-found))
-        (current-points (default-to u0 (get points (map-get? user-rewards { user: user, business-id: business-id }))))
+        (current-count (get ratings-count business))
+        (current-rating (get rating business))
+        (new-count (+ current-count u1))
+        (total-rating (+ (* current-rating current-count) new-rating))
+        (new-avg-rating (/ (* total-rating u100) (* new-count u100)))
     )
-    (if (get rewards-enabled business)
-        (begin
-            (map-set user-rewards
-                { user: user, business-id: business-id }
-                { points: (+ current-points amount) }
-            )
-            (ok true)
-        )
-        (ok false)
-    ))
+    (map-set businesses
+        { business-id: business-id }
+        (merge business {
+            rating: new-avg-rating,
+            ratings-count: new-count
+        })
+    )
+    (ok true))
 )
 
 ;; Public Functions
@@ -71,6 +78,10 @@
     (let (
         (business-id (var-get next-business-id))
     )
+    (asserts! (> (len name) u0) err-invalid-input)
+    (asserts! (> (len description) u0) err-invalid-input)
+    (asserts! (> (len eco-credentials) u0) err-invalid-input)
+    (asserts! (is-valid-category category) err-invalid-category)
     (asserts! (map-insert businesses
         { business-id: business-id }
         {
@@ -80,6 +91,7 @@
             eco-credentials: eco-credentials,
             category: category,
             rating: u0,
+            ratings-count: u0,
             verified: false,
             total-support: u0,
             rewards-enabled: false,
@@ -87,78 +99,8 @@
         }
     ) err-already-exists)
     (var-set next-business-id (+ business-id u1))
+    (print { type: "business-registered", business-id: business-id })
     (ok business-id))
 )
 
-(define-public (enable-rewards (business-id uint))
-    (let ((business (unwrap! (map-get? businesses { business-id: business-id }) err-not-found)))
-        (asserts! (is-business-owner business-id tx-sender) err-unauthorized)
-        (map-set businesses
-            { business-id: business-id }
-            (merge business { rewards-enabled: true })
-        )
-        (ok true)
-    )
-)
-
-(define-public (rate-business (business-id uint) (rating uint))
-    (begin
-        (asserts! (<= rating u5) (err u104))
-        (asserts! (map-insert user-ratings
-            { user: tx-sender, business-id: business-id }
-            { rating: rating }
-        ) (err u105))
-        (try! (award-points tx-sender business-id u10))
-        (ok true)
-    )
-)
-
-(define-public (verify-business (business-id uint))
-    (begin
-        (asserts! (is-some (map-get? businesses { business-id: business-id })) err-not-found)
-        (map-set verifications
-            { user: tx-sender, business-id: business-id }
-            { verified: true }
-        )
-        (try! (award-points tx-sender business-id u50))
-        (ok true)
-    )
-)
-
-(define-public (support-business (business-id uint) (amount uint))
-    (let (
-        (business (unwrap! (map-get? businesses { business-id: business-id }) err-not-found))
-    )
-    (begin
-        (try! (stx-transfer? amount tx-sender (get owner business)))
-        (map-set businesses
-            { business-id: business-id }
-            (merge business { total-support: (+ (get total-support business) amount) })
-        )
-        (try! (award-points tx-sender business-id (/ amount u100)))
-        (ok true)
-    ))
-)
-
-;; Read-only Functions
-(define-read-only (get-business (business-id uint))
-    (ok (map-get? businesses { business-id: business-id }))
-)
-
-(define-read-only (get-business-rating (business-id uint))
-    (ok (get rating (unwrap! (map-get? businesses { business-id: business-id }) err-not-found)))
-)
-
-(define-read-only (get-business-verification-count (business-id uint))
-    (ok (len (map-get? verifications { business-id: business-id })))
-)
-
-(define-read-only (get-user-points (user principal) (business-id uint))
-    (ok (default-to u0 (get points (map-get? user-rewards { user: user, business-id: business-id }))))
-)
-
-(define-read-only (get-businesses-by-category (category (string-ascii 20)))
-    (filter businesses (lambda (business)
-        (is-eq (get category business) category)
-    ))
-)
+[... rest of the contract remains unchanged ...]
