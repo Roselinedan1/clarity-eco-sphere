@@ -1,7 +1,5 @@
-// [Previous imports remain unchanged]
-
 Clarinet.test({
-    name: "Properly calculates average rating",
+    name: "Properly calculates precise average rating",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const wallet1 = accounts.get('wallet_1')!;
         const wallet2 = accounts.get('wallet_2')!;
@@ -28,15 +26,15 @@ Clarinet.test({
             ], wallet2.address)
         ]);
         
-        // Check final rating
+        // Check final rating (should be 4.5)
         let ratingBlock = chain.mineBlock([
             Tx.contractCall('eco-sphere', 'get-business-rating', [
                 types.uint(1)
             ], wallet1.address)
         ]);
         
-        ratingBlock.receipts[0].result.expectOk().expectUint(4);
+        ratingBlock.receipts[0].result.expectOk().expectUint(450); // 4.5 * 100
     }
 });
 
-// [Previous tests remain unchanged]
+[... rest of the tests remain unchanged ...]
